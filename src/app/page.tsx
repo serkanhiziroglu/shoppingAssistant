@@ -2,16 +2,17 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react';
-import { ChatWindow } from '../components/chat-window';
-import { processProductsWithLlama } from '@/lib/shopping-api';
-import { Product, SearchResponse } from '@/types';
+import { ChatWindow } from '@/components/chat-window';
+import { Product, SearchResponse, Message } from '@/types';
+
+const LLAMA_API_KEY = 'LA-6fde914b0d7d4e0a901bbbc5c4b1049d87556847a5704030865ef58b7bc0c145';
 
 export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const chatRef = useRef(null);
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
       type: 'bot',
@@ -50,12 +51,64 @@ export default function Home() {
     }
   };
 
+  const processWithLlama = async (query: string, products: Product[]) => {
+    try {
+      const response = await fetch('/api/llama', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          products
+        }),
+      });
+  
+      const data = await response.json();
+  
+      if (!response.ok) {
+        console.error('API Error:', data.error || 'Unknown error');
+        throw new Error(data.error || 'Failed to process with AI');
+      }
+      
+      return {
+        message: data.message,
+        products: data.products
+      };
+    } catch (error) {
+      console.error('AI processing error:', error);
+      
+      // Fallback to sorting by rating
+      const sortedProducts = [...products]
+        .sort((a, b) => ((b.rating || 0) - (a.rating || 0)))
+        .slice(0, 3);
+      
+      return {
+        message: createDefaultResponse(query, sortedProducts),
+        products: sortedProducts
+      };
+    }
+  };
+
+  // Helper function to create default response
+  const createDefaultResponse = (query: string, products: Product[]): string => {
+    const priceRange = products.reduce(
+      (range, p) => ({
+        min: Math.min(range.min, p.price),
+        max: Math.max(range.max, p.price)
+      }),
+      { min: Infinity, max: -Infinity }
+    );
+
+    return `Based on your search for "${query}", I've found some great options ranging from $${priceRange.min.toFixed(2)} to $${priceRange.max.toFixed(2)}. These products were selected based on their ratings, features, and value for money.`;
+  };
+
   const handleSend = async () => {
     if (inputValue.trim() && !isLoading) {
       setIsLoading(true);
 
       // Add user message
-      const userMessage = {
+      const userMessage: Message = {
         id: messages.length + 1,
         type: 'user',
         content: inputValue
@@ -65,7 +118,7 @@ export default function Home() {
 
       try {
         // Add typing indicator
-        const typingMessage = {
+        const typingMessage: Message = {
           id: messages.length + 2,
           type: 'bot',
           content: '...',
@@ -73,7 +126,7 @@ export default function Home() {
         };
         setMessages(prev => [...prev, typingMessage]);
 
-        // Search for products with error handling
+        // Search for products
         let products: Product[] = [];
         try {
           const searchResponse = await searchProducts(userMessage.content);
@@ -89,22 +142,18 @@ export default function Home() {
           return;
         }
 
-        // Process products with Llama if search was successful
+        // Process with Llama if products found
         if (products.length > 0) {
-          const aiResponse = await processProductsWithLlama(userMessage.content, products);
+          const aiResponse = await processWithLlama(userMessage.content, products);
 
-          // Remove typing indicator
-          setMessages(prev => prev.filter(msg => !msg.isTyping));
-
-          // Add bot response with products
-          setMessages(prev => [...prev, {
+          // Remove typing indicator and add response
+          setMessages(prev => [...prev.filter(msg => !msg.isTyping), {
             id: messages.length + 2,
             type: 'products',
             textContent: aiResponse.message,
             products: aiResponse.products
           }]);
         } else {
-          // No products found
           setMessages(prev => [...prev.filter(msg => !msg.isTyping), {
             id: messages.length + 2,
             type: 'bot',
