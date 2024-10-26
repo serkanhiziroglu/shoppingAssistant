@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react';
-import { ChatWindow } from './components/chat-window';
-import { searchProducts } from './utils/product-serach';
-import { processProductsWithLlama } from './utils/llama-ai';
+import { ChatWindow } from '../components/chat-window';
+import { searchProducts } from '../utils/product-serach';
+import { processProductsWithLlama } from '../utils/llama-ai';
 
 export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
