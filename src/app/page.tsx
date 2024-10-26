@@ -1,9 +1,10 @@
+// app/page.tsx
 "use client"
 
 import { useState, useRef, useEffect } from 'react';
 import { ChatWindow } from '../components/chat-window';
-import { searchProducts } from '../utils/product-serach';
-import { processProductsWithLlama } from '../utils/llama-ai';
+import { processProductsWithLlama } from '@/lib/shopping-api';
+import { Product, SearchResponse } from '@/types';
 
 export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -28,6 +29,27 @@ export default function Home() {
     }
   }, [isChatOpen]);
 
+  const searchProducts = async (query: string): Promise<SearchResponse> => {
+    try {
+      const params = new URLSearchParams({
+        q: query,
+        page: '1',
+        limit: '10'
+      });
+
+      const response = await fetch(`/api/search?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch products');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error searching products:', error);
+      throw error;
+    }
+  };
+
   const handleSend = async () => {
     if (inputValue.trim() && !isLoading) {
       setIsLoading(true);
@@ -51,17 +73,30 @@ export default function Home() {
         };
         setMessages(prev => [...prev, typingMessage]);
 
-        // Search for products
-        const products = await searchProducts(userMessage.content);
+        // Search for products with error handling
+        let products: Product[] = [];
+        try {
+          const searchResponse = await searchProducts(userMessage.content);
+          products = searchResponse.products;
+        } catch (searchError) {
+          console.error('Product search error:', searchError);
+          setMessages(prev => [...prev.filter(msg => !msg.isTyping), {
+            id: messages.length + 2,
+            type: 'bot',
+            content: "Sorry, I encountered an error while searching for products. Please try again."
+          }]);
+          setIsLoading(false);
+          return;
+        }
 
-        // Process products with Llama
-        const aiResponse = await processProductsWithLlama(userMessage.content, products);
+        // Process products with Llama if search was successful
+        if (products.length > 0) {
+          const aiResponse = await processProductsWithLlama(userMessage.content, products);
 
-        // Remove typing indicator
-        setMessages(prev => prev.filter(msg => !msg.isTyping));
+          // Remove typing indicator
+          setMessages(prev => prev.filter(msg => !msg.isTyping));
 
-        // Add bot response with products
-        if (aiResponse.products && aiResponse.products.length > 0) {
+          // Add bot response with products
           setMessages(prev => [...prev, {
             id: messages.length + 2,
             type: 'products',
@@ -69,19 +104,19 @@ export default function Home() {
             products: aiResponse.products
           }]);
         } else {
-          // Add regular bot response if no products
-          setMessages(prev => [...prev, {
+          // No products found
+          setMessages(prev => [...prev.filter(msg => !msg.isTyping), {
             id: messages.length + 2,
             type: 'bot',
             content: "I couldn't find any products matching your search. Could you try describing what you're looking for differently?"
           }]);
         }
       } catch (error) {
-        console.error('Error:', error);
+        console.error('Error in handle send:', error);
         setMessages(prev => [...prev.filter(msg => !msg.isTyping), {
           id: messages.length + 2,
           type: 'bot',
-          content: "Sorry, I encountered an error while searching for products. Please try again."
+          content: "Sorry, I encountered an error while processing your request. Please try again."
         }]);
       } finally {
         setIsLoading(false);
@@ -92,7 +127,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-white pt-32">
       <div className="container mx-auto px-4 pb-12">
-        {/* Welcome Section - Fixed at top */}
+        {/* Welcome Section */}
         <div className="text-center max-w-2xl mx-auto mb-16">
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
             AI Shopping Assistant
